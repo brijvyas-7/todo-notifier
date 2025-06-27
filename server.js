@@ -1,68 +1,75 @@
-// ✅ Backend: server.js (updated to use .env and Firebase Admin SDK)
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const admin = require('firebase-admin');
-const fetch = require('node-fetch');
+// STEP 1: Install these on your Render backend if not done yet
+// npm install express cors dotenv firebase-admin node-cron
+
+const express = require("express");
+const cors = require("cors");
+const admin = require("firebase-admin");
+const cron = require("node-cron");
+require("dotenv\config");
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+app.use(cors());
+app.use(express.json());
 
-// ✅ Initialize Firebase Admin with environment variables
+// Firebase Admin Setup
+const serviceAccount = require("./firebase-service-account.json");
+
 admin.initializeApp({
-  credential: admin.credential.cert({
-    type: process.env.FIREBASE_TYPE,
-    project_id: process.env.FIREBASE_PROJECT_ID,
-    private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
-    private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-    client_email: process.env.FIREBASE_CLIENT_EMAIL,
-    client_id: process.env.FIREBASE_CLIENT_ID,
-  })
+  credential: admin.credential.cert(serviceAccount)
 });
 
 const db = admin.firestore();
 
-app.use(cors());
-app.use(express.json());
-
-// ✅ Route to store task
-app.post('/add-task', async (req, res) => {
-  const task = req.body;
+// Save task to Firestore
+app.post("/save-task", async (req, res) => {
   try {
-    const docRef = await db.collection('tasks').add(task);
-    res.status(200).json({ id: docRef.id, message: 'Task added' });
-  } catch (err) {
-    console.error('Error adding task:', err);
-    res.status(500).json({ error: 'Failed to add task' });
-  }
-});
-
-// ✅ Reminder Trigger (simulate scheduler like cron job)
-app.post('/send-notification', async (req, res) => {
-  const { title, message } = req.body;
-
-  try {
-    // Use OneSignal API to send notification
-    const onesignalRes = await fetch('https://onesignal.com/api/v1/notifications', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Basic ${process.env.ONESIGNAL_REST_API_KEY}`,
-      },
-      body: JSON.stringify({
-        app_id: process.env.ONESIGNAL_APP_ID,
-        included_segments: ['Subscribed Users'],
-        headings: { en: title },
-        contents: { en: message },
-      })
+    const { name, time, date, priority, playerId } = req.body;
+    await db.collection("tasks").add({
+      name,
+      time,
+      date,
+      priority,
+      playerId,
+      alerted: false,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
     });
-
-    const json = await onesignalRes.json();
-    res.status(200).json({ success: true, json });
+    res.status(200).json({ success: true });
   } catch (err) {
-    console.error('Notification error:', err);
-    res.status(500).json({ error: 'Notification failed' });
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
+// Check & send notifications (runs every minute)
+cron.schedule("* * * * *", async () => {
+  const now = new Date();
+  const snapshot = await db.collection("tasks").where("alerted", "==", false).get();
+
+  snapshot.forEach(async doc => {
+    const task = doc.data();
+    const taskTime = new Date(`${task.date}T${task.time}`);
+
+    if (taskTime <= now && now - taskTime <= 60000) {
+      // Call OneSignal API
+      await fetch("https://onesignal.com/api/v1/notifications", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Basic ${process.env.ONESIGNAL_API_KEY}`
+        },
+        body: JSON.stringify({
+          app_id: process.env.ONESIGNAL_APP_ID,
+          include_player_ids: [task.playerId],
+          headings: { en: "⏰ Reminder" },
+          contents: { en: `Your task '${task.name}' is due now!` },
+        })
+      });
+
+      await doc.ref.update({ alerted: true });
+    }
+  });
+});
+
+app.get("/ping", (_, res) => res.send("✅ Reminder server running"));
+
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
