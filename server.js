@@ -1,75 +1,48 @@
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const fs = require("fs");
 const axios = require("axios");
-const cron = require("node-cron");
-const app = express();
 
-const ONE_SIGNAL_APP_ID = "db9451af-136d-4ce4-bc80-b39aa7589d4c"; // Replace this
-const ONE_SIGNAL_API_KEY = "os_v2_app_3okfdlytnvgojpeawonkowe5jt5t7k6dfppewje2xmzcoau3n34o4chwfbj7gnpmg7x2m26zlgcqwk3ys35tf6gwia3im4cymhbimzq"; // Replace this
+const app = express();
+app.use(cors());
+app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
+const ONESIGNAL_APP_ID = process.env.ONESIGNAL_APP_ID;
+const REST_API_KEY = process.env.ONESIGNAL_REST_API_KEY;
 
-// Read tasks
-function getTasks() {
+app.post("/send-notification", async (req, res) => {
+  const { title = "🔔 Reminder!", message = "You have a task due!" } = req.body;
+
   try {
-    return JSON.parse(fs.readFileSync("tasks.json", "utf-8"));
-  } catch {
-    return [];
-  }
-}
-
-// Save tasks
-function saveTasks(tasks) {
-  fs.writeFileSync("tasks.json", JSON.stringify(tasks, null, 2));
-}
-
-// Send push
-async function sendPushNotification(taskName) {
-  try {
-    await axios.post(
+    const response = await axios.post(
       "https://onesignal.com/api/v1/notifications",
       {
-        app_id: ONE_SIGNAL_APP_ID,
-        included_segments: ["All"],
-        headings: { en: "⏰ Task Reminder" },
-        contents: { en: `${taskName} is due now!` }
+        app_id: ONESIGNAL_APP_ID,
+        included_segments: ["Subscribed Users"],
+        headings: { en: title },
+        contents: { en: message },
+        url: "https://brijvyas-7.github.io/Todo-List/",
       },
       {
         headers: {
-          Authorization: `Basic ${ONE_SIGNAL_API_KEY}`,
-          "Content-Type": "application/json"
-        }
+          "Content-Type": "application/json",
+          Authorization: `Basic ${REST_API_KEY}`,
+        },
       }
     );
-    console.log(`✅ Notification sent for: ${taskName}`);
-  } catch (err) {
-    console.error("❌ Failed to send:", err.message);
+
+    res.status(200).json({ success: true, response: response.data });
+  } catch (error) {
+    console.error("❌ Error sending notification:", error.response?.data || error.message);
+    res.status(500).json({ success: false, error: error.message });
   }
-}
-
-// Check every 1 min
-cron.schedule("* * * * *", () => {
-  const now = new Date();
-  const tasks = getTasks();
-  let updated = false;
-
-  tasks.forEach(task => {
-    if (!task.alerted && task.date && task.time) {
-      const taskTime = new Date(`${task.date}T${task.time}`);
-      if (Math.abs(now - taskTime) < 60000) {
-        sendPushNotification(task.name);
-        task.alerted = true;
-        updated = true;
-      }
-    }
-  });
-
-  if (updated) saveTasks(tasks);
 });
 
-app.get("/", (_, res) => res.send("✅ Reminder server running"));
+app.get("/", (req, res) => {
+  res.send("✅ OneSignal Notification Server is Running!");
+});
 
 app.listen(PORT, () => {
-  console.log(`🚀 http://localhost:${PORT}`);
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
