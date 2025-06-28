@@ -1,17 +1,18 @@
-// STEP 1: Install on Render if not done:
-// npm install express cors dotenv firebase-admin node-cron
+// STEP 1: Install these on your backend:
+// npm install express cors dotenv firebase-admin node-cron moment moment-timezone
 
 const express = require("express");
 const cors = require("cors");
 const admin = require("firebase-admin");
 const cron = require("node-cron");
+const moment = require("moment-timezone");
 require("dotenv").config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 🔐 Firebase Admin Initialization
+// 🔐 Firebase Admin Setup
 const serviceAccount = {
   type: process.env.FIREBASE_TYPE,
   project_id: process.env.FIREBASE_PROJECT_ID,
@@ -26,17 +27,15 @@ const serviceAccount = {
 };
 
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+  credential: admin.credential.cert(serviceAccount),
 });
 
 const db = admin.firestore();
 
-// 📥 Save Task Endpoint
+// ✅ Save task to Firestore
 app.post("/save-task", async (req, res) => {
   try {
     const { name, time, date, priority, playerId } = req.body;
-    console.log("✅ Task saved to Firestore:", { name, time, date, playerId });
-
     await db.collection("tasks").add({
       name,
       time,
@@ -44,20 +43,20 @@ app.post("/save-task", async (req, res) => {
       priority,
       playerId,
       alerted: false,
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
-
+    console.log("✅ Task saved to Firestore:", { name, time, date, playerId });
     res.status(200).json({ success: true });
   } catch (err) {
-    console.error("❌ Save failed:", err.message);
+    console.error("❌ Failed to save task:", err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// 🔁 CRON to check every 1 min
+// ⏰ Check & Send Push Notification (every minute)
 cron.schedule("* * * * *", async () => {
-  const now = new Date();
-  console.log("🔁 Cron running at:", now.toISOString());
+  const now = moment().tz("Asia/Kolkata");
+  console.log("🔁 Cron running at:", now.format());
 
   try {
     const snapshot = await db.collection("tasks").where("alerted", "==", false).get();
@@ -67,14 +66,10 @@ cron.schedule("* * * * *", async () => {
       const task = doc.data();
       console.log(`🔍 Task: ${task.name}`);
 
-      // Convert task time (entered in IST) to UTC
-      const [h, m] = task.time.split(":").map(Number);
-      const [y, mo, d] = task.date.split("-").map(Number);
-      const taskTime = new Date(Date.UTC(y, mo - 1, d, h - 5, m - 30));
+      const taskTime = moment.tz(`${task.date} ${task.time}`, "YYYY-MM-DD HH:mm", "Asia/Kolkata");
+      console.log(`⏰ Task Time: ${taskTime.format()}`);
 
-      console.log(`⏰ Task Time: ${taskTime.toISOString()}`);
-
-      if (taskTime <= now && now - taskTime <= 60000) {
+      if (taskTime.isSameOrBefore(now) && now.diff(taskTime, 'minutes') <= 1) {
         console.log(`📣 Sending push to ${task.playerId}`);
 
         const response = await fetch("https://onesignal.com/api/v1/notifications", {
@@ -87,12 +82,12 @@ cron.schedule("* * * * *", async () => {
             app_id: process.env.ONESIGNAL_APP_ID,
             include_player_ids: [task.playerId],
             headings: { en: "⏰ Reminder" },
-            contents: { en: `Your task '${task.name}' is due now!` }
-          })
+            contents: { en: `Your task '${task.name}' is due now!` },
+          }),
         });
 
         const result = await response.json();
-        console.log("✅ Push response:", result);
+        console.log("📤 Push result:", result);
 
         await doc.ref.update({ alerted: true });
       } else {
@@ -104,7 +99,7 @@ cron.schedule("* * * * *", async () => {
   }
 });
 
-// ✅ Render health check route
+// Health check route
 app.get("/ping", (_, res) => res.send("✅ Reminder server running"));
 
 const PORT = process.env.PORT || 3000;
