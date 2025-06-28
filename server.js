@@ -67,7 +67,7 @@ cron.schedule("* * * * *", async () => {
       console.log("🔍 Task:", task.name);
       console.log("⏰ Task Time:", taskTime.toISOString());
 
-      if (taskTime <= now && now - taskTime <= 60000) {
+      if (taskTime <= now && now - taskTime <= 120000) {
         console.log(`📤 Sending notification to: ${task.playerId}`);
 
         try {
