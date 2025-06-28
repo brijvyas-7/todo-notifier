@@ -1,6 +1,4 @@
-// STEP 1: Install these on your backend:
-// npm install express cors dotenv firebase-admin node-cron moment moment-timezone
-
+// ✅ STEP 1: Required packages
 const express = require("express");
 const cors = require("cors");
 const admin = require("firebase-admin");
@@ -12,7 +10,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 🔐 Firebase Admin Setup
+// ✅ STEP 2: Firebase Admin SDK config via .env
 const serviceAccount = {
   type: process.env.FIREBASE_TYPE,
   project_id: process.env.FIREBASE_PROJECT_ID,
@@ -26,13 +24,10 @@ const serviceAccount = {
   client_x509_cert_url: process.env.FIREBASE_CLIENT_CERT_URL,
 };
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
-
+admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 const db = admin.firestore();
 
-// ✅ Save task to Firestore
+// ✅ STEP 3: Save Task Endpoint
 app.post("/save-task", async (req, res) => {
   try {
     const { name, time, date, priority, playerId } = req.body;
@@ -43,50 +38,53 @@ app.post("/save-task", async (req, res) => {
       priority,
       playerId,
       alerted: false,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
     });
     console.log("✅ Task saved to Firestore:", { name, time, date, playerId });
     res.status(200).json({ success: true });
   } catch (err) {
-    console.error("❌ Failed to save task:", err);
+    console.error("❌ Save task failed:", err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// ⏰ Check & Send Push Notification (every minute)
+// ✅ STEP 4: Cron Job Every Minute to Send Due Reminders
 cron.schedule("* * * * *", async () => {
-  const now = moment().tz("Asia/Kolkata");
-  console.log("🔁 Cron running at:", now.format());
-
+  console.log(`🔁 Cron running at: ${new Date().toISOString()}`);
   try {
+    const now = moment().tz("Asia/Kolkata");
     const snapshot = await db.collection("tasks").where("alerted", "==", false).get();
-    console.log(`📄 Found ${snapshot.size} unalerted tasks`);
 
+    console.log(`📋 Found ${snapshot.size} unalerted tasks`);
     snapshot.forEach(async doc => {
       const task = doc.data();
-      console.log(`🔍 Task: ${task.name}`);
-
       const taskTime = moment.tz(`${task.date} ${task.time}`, "YYYY-MM-DD HH:mm", "Asia/Kolkata");
-      console.log(`⏰ Task Time: ${taskTime.format()}`);
 
-      if (taskTime.isSameOrBefore(now) && now.diff(taskTime, 'minutes') <= 1) {
-        console.log(`📣 Sending push to ${task.playerId}`);
+      console.log("🔍 Task:", task.name);
+      console.log("⏰ Task Time:", taskTime.format());
 
-        const response = await fetch("https://onesignal.com/api/v1/notifications", {
+      // Check if it's within 1 minute of the current time
+      if (taskTime.isSameOrBefore(now) && now.diff(taskTime, 'minutes') < 2) {
+        console.log("🚀 Sending push to:", task.playerId);
+
+        // 🔐 Log partially masked key for debugging
+        console.log("🔐 Using API Key:", (process.env.ONESIGNAL_API_KEY || "").substring(0, 10) + "...");
+
+        const pushResponse = await fetch("https://onesignal.com/api/v1/notifications", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Basic ${process.env.ONESIGNAL_REST_API_KEY}`
+            "Authorization": `Basic ${process.env.ONESIGNAL_API_KEY}`
           },
           body: JSON.stringify({
             app_id: process.env.ONESIGNAL_APP_ID,
             include_player_ids: [task.playerId],
             headings: { en: "⏰ Reminder" },
             contents: { en: `Your task '${task.name}' is due now!` },
-          }),
+          })
         });
 
-        const result = await response.json();
+        const result = await pushResponse.json();
         console.log("📤 Push result:", result);
 
         await doc.ref.update({ alerted: true });
@@ -99,7 +97,7 @@ cron.schedule("* * * * *", async () => {
   }
 });
 
-// Health check route
+// ✅ Simple Ping Test Route
 app.get("/ping", (_, res) => res.send("✅ Reminder server running"));
 
 const PORT = process.env.PORT || 3000;
