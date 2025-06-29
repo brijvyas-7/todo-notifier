@@ -79,8 +79,9 @@ cron.schedule("* * * * *", async () => {
           body: JSON.stringify({
             app_id: process.env.ONESIGNAL_APP_ID,
             include_player_ids: [task.playerId],
-            headings: { en: "⏰ Reminder" },
+            headings: { en: "⏰ Reminder : Hey buddy!" },
             contents: { en: `Your task '${task.name}' is due now!` },
+            url: "https://brijvyas-7.github.io/Todo-List/"
           })
         });
 
