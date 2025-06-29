@@ -79,12 +79,10 @@ cron.schedule("* * * * *", async () => {
   body: JSON.stringify({
     app_id: process.env.ONESIGNAL_APP_ID,
     include_player_ids: [task.playerId],
-    headings: { en: "⏰ Reminder: Hey buddy!" },
+    headings: { en: "⏰ Reminder : Hey buddy!" },
     contents: { en: `Your task '${task.name}' is due now!` },
-    chrome_web_icon: "", // optional: hide icon if not needed
-    chrome_web_image: "", // optional: remove preview image
-    chrome_web_origin: "", // 🧨 This removes the "from Todo" origin line
-    url: "", // leave blank to prevent linking and hide line
+    chrome_web_origin: "",       // ✅ Prevent "from Todo"
+    url: "",                     // ✅ Prevent default link
   }),
 });
 
