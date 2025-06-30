@@ -8,7 +8,12 @@ require("dotenv").config();
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 const app = express();
-app.use(cors());
+
+// ✅ Allow only your GitHub Pages domain
+app.use(cors({
+  origin: "https://brijvyas-7.github.io"
+}));
+
 app.use(express.json());
 
 // ✅ STEP 2: Firebase Admin SDK config via .env
@@ -60,9 +65,15 @@ cron.schedule("* * * * *", async () => {
     const snapshot = await db.collection("tasks").where("alerted", "==", false).get();
 
     console.log(`📋 Found ${snapshot.size} unalerted tasks`);
-    snapshot.forEach(async doc => {
+
+    for (const doc of snapshot.docs) {
       const task = doc.data();
       const taskTime = moment.tz(`${task.date} ${task.time}`, "YYYY-MM-DD HH:mm", "Asia/Kolkata");
+
+      if (!task.playerId) {
+        console.warn(`⚠️ Skipping task without playerId: ${task.name}`);
+        continue;
+      }
 
       console.log("🔍 Task:", task.name);
       console.log("⏰ Task Time:", taskTime.format());
@@ -70,7 +81,8 @@ cron.schedule("* * * * *", async () => {
       if (taskTime.isSameOrBefore(now) && now.diff(taskTime, 'minutes') < 2) {
         console.log("🚀 Sending push to:", task.playerId);
 
-        const messageBody = `${task.username || "Aye Captain!"}: your task '${task.name}' is due now!`;
+        const usernameDisplay = task.username || "Buddy";
+        const messageBody = `${usernameDisplay}, your task '${task.name}' is due now!`;
 
         const pushResponse = await fetch("https://onesignal.com/api/v1/notifications", {
           method: "POST",
@@ -81,7 +93,7 @@ cron.schedule("* * * * *", async () => {
           body: JSON.stringify({
             app_id: process.env.ONESIGNAL_APP_ID,
             include_player_ids: [task.playerId],
-            headings: { en: "⏰ Reminder: Hey buddy!" },
+            headings: { en: "⏰ Reminder" },
             contents: { en: messageBody },
             url: "https://brijvyas-7.github.io/Todo-List/"
           })
@@ -89,11 +101,16 @@ cron.schedule("* * * * *", async () => {
 
         const result = await pushResponse.json();
         console.log("📤 Push result:", result);
-        await doc.ref.update({ alerted: true });
+
+        if (result.errors || result.id === undefined) {
+          console.warn("⚠️ Push not sent or invalid:", result);
+        } else {
+          await doc.ref.update({ alerted: true });
+        }
       } else {
-        console.log(`⏱️ Task not yet due or already passed: ${task.name}`);
+        console.log(`⏱️ Task not due yet: ${task.name}`);
       }
-    });
+    }
   } catch (err) {
     console.error("❌ Cron failed:", err.message);
   }
