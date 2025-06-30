@@ -5,6 +5,7 @@ const admin = require("firebase-admin");
 const cron = require("node-cron");
 const moment = require("moment-timezone");
 require("dotenv").config();
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 const app = express();
 app.use(cors());
@@ -30,17 +31,20 @@ const db = admin.firestore();
 // ✅ STEP 3: Save Task Endpoint
 app.post("/save-task", async (req, res) => {
   try {
-    const { name, time, date, priority, playerId } = req.body;
+    const { name, time, date, priority, playerId, username } = req.body;
+
     await db.collection("tasks").add({
       name,
       time,
       date,
       priority,
       playerId,
+      username: username || "", // Store username
       alerted: false,
       createdAt: admin.firestore.FieldValue.serverTimestamp()
     });
-    console.log("✅ Task saved to Firestore:", { name, time, date, playerId });
+
+    console.log("✅ Task saved to Firestore:", { name, time, date, playerId, username });
     res.status(200).json({ success: true });
   } catch (err) {
     console.error("❌ Save task failed:", err);
@@ -63,31 +67,28 @@ cron.schedule("* * * * *", async () => {
       console.log("🔍 Task:", task.name);
       console.log("⏰ Task Time:", taskTime.format());
 
-      // Check if it's within 1 minute of the current time
       if (taskTime.isSameOrBefore(now) && now.diff(taskTime, 'minutes') < 2) {
         console.log("🚀 Sending push to:", task.playerId);
 
-        // 🔐 Log partially masked key for debugging
-        console.log("🔐 Using API Key:", (process.env.ONESIGNAL_API_KEY || "").substring(0, 10) + "...");
+        const messageBody = `${task.username || "Hey buddy"}, your task '${task.name}' is due now!`;
 
         const pushResponse = await fetch("https://onesignal.com/api/v1/notifications", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    "Authorization": `Basic ${process.env.ONESIGNAL_API_KEY}`
-  },
-  body: JSON.stringify({
-    app_id: process.env.ONESIGNAL_APP_ID,
-    include_player_ids: [task.playerId],
-    headings: { en: "⏰ Reminder: Hey buddy!" },
-    contents: { en: `${task.username || "Hey buddy"}, your task '${task.name}' is due now!` },
-    url: "https://brijvyas-7.github.io/Todo-List/"
-  })
-});
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Basic ${process.env.ONESIGNAL_API_KEY}`
+          },
+          body: JSON.stringify({
+            app_id: process.env.ONESIGNAL_APP_ID,
+            include_player_ids: [task.playerId],
+            headings: { en: "⏰ Reminder: Hey buddy!" },
+            contents: { en: messageBody },
+            url: "https://brijvyas-7.github.io/Todo-List/"
+          })
+        });
 
         const result = await pushResponse.json();
         console.log("📤 Push result:", result);
-
         await doc.ref.update({ alerted: true });
       } else {
         console.log(`⏱️ Task not yet due or already passed: ${task.name}`);
