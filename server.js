@@ -70,7 +70,7 @@ cron.schedule("* * * * *", async () => {
       if (taskTime.isSameOrBefore(now) && now.diff(taskTime, 'minutes') < 2) {
         console.log("🚀 Sending push to:", task.playerId);
 
-        const messageBody = `${task.username || "Hey buddy"}, your task '${task.name}' is due now!`;
+        const messageBody = `${task.username || "Aye Captain!"}: your task '${task.name}' is due now!`;
 
         const pushResponse = await fetch("https://onesignal.com/api/v1/notifications", {
           method: "POST",
